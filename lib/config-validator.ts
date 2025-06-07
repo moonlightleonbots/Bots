@@ -12,8 +12,8 @@ export class ConfigValidator {
     const warnings: string[] = []
 
     // Supabase Konfiguration prüfen
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+    const supabaseUrl = 'https://cubmcmzhmskcrfvrlmcc.supabase.co'
+    const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN1Ym1jbXpobXNrY3JmdnJsbWNjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDkzMDEzNDIsImV4cCI6MjA2NDg3NzM0Mn0.2eBgMujDLJ-Wf0QekVg3SFO-c9bnEZuu5aYDNtcNUO4'
 
     if (!supabaseUrl) {
       errors.push("NEXT_PUBLIC_SUPABASE_URL ist nicht konfiguriert")
