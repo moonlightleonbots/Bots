@@ -10,10 +10,11 @@ import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Bot, Plus, Activity, Users, MessageSquare, Shield, LogOut, Info } from "lucide-react"
+import { Bot, Plus, Activity, Users, MessageSquare, Shield, LogOut, Info, Sparkles } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { BotManager } from "@/lib/bot-manager"
 import { ConfigCheck } from "@/components/config-check"
+import { PublicRegistrationInfo } from "@/components/public-registration-info"
 
 interface BotConfig {
   id: string
@@ -39,13 +40,13 @@ export default function DashboardPage() {
   const [newBotName, setNewBotName] = useState("")
   const [isLoading, setIsLoading] = useState(true)
   const [debugInfo, setDebugInfo] = useState<any>(null)
+  const [isNewUser, setIsNewUser] = useState(false)
   const router = useRouter()
   const [botManager] = useState(() => BotManager.getInstance())
   const [configValid, setConfigValid] = useState(false)
 
   useEffect(() => {
     checkUser()
-    // Debug-Info alle 5 Sekunden aktualisieren
     const debugInterval = setInterval(() => {
       setDebugInfo(botManager.getDebugInfo())
     }, 5000)
@@ -68,6 +69,13 @@ export default function DashboardPage() {
       }
 
       setUser(user)
+
+      // Prüfe ob der User neu ist (weniger als 5 Minuten registriert)
+      const userCreated = new Date(user.created_at)
+      const now = new Date()
+      const diffMinutes = (now.getTime() - userCreated.getTime()) / (1000 * 60)
+      setIsNewUser(diffMinutes < 5)
+
       loadBots()
     } catch (error) {
       console.error("Auth error:", error)
@@ -131,7 +139,6 @@ export default function DashboardPage() {
 
   const handleLogout = async () => {
     try {
-      // Alle Bots stoppen vor Logout
       await botManager.stopAllBots()
 
       const { createClient } = await import("@/lib/supabase")
@@ -239,15 +246,12 @@ export default function DashboardPage() {
     if (!selectedBot) return
 
     if (selectedBot.status === "online" || selectedBot.status === "starting") {
-      // Bot stoppen
       updateBot({ status: "offline" })
       const result = await botManager.stopBot(selectedBot.id)
       if (!result.success) {
         console.error(`Bot-Stop Warnung: ${result.error}`)
-        // Trotzdem als offline markieren
       }
     } else {
-      // Bot starten
       updateBot({ status: "starting" })
       const result = await botManager.startBot(selectedBot)
       if (!result.success) {
@@ -256,7 +260,6 @@ export default function DashboardPage() {
         return
       }
 
-      // Status-Updates vom BotManager abonnieren
       const checkStatus = () => {
         const botStatus = botManager.getBotStatus(selectedBot.id)
         if (botStatus && botStatus.status !== selectedBot.status) {
@@ -268,7 +271,7 @@ export default function DashboardPage() {
       }
 
       const interval = setInterval(checkStatus, 1000)
-      setTimeout(() => clearInterval(interval), 15000) // 15 Sekunden überwachen
+      setTimeout(() => clearInterval(interval), 15000)
     }
   }
 
@@ -317,6 +320,7 @@ export default function DashboardPage() {
           <div className="flex items-center space-x-4">
             <Bot className="h-8 w-8 text-indigo-600" />
             <h1 className="text-2xl font-bold">BotHost Dashboard</h1>
+            {isNewUser && <Badge variant="secondary">Neu!</Badge>}
           </div>
           <div className="flex items-center space-x-4">
             <span className="text-sm text-gray-600">Hallo, {user.user_metadata?.full_name || user.email}</span>
@@ -329,7 +333,20 @@ export default function DashboardPage() {
       </header>
 
       <div className="p-6">
+        {/* Willkommensnachricht für neue Benutzer */}
+        {isNewUser && (
+          <Alert className="mb-6">
+            <Sparkles className="h-4 w-4" />
+            <AlertDescription>
+              <strong>Willkommen bei BotHost! 🎉</strong> Du hast automatisch 3 Demo-Bots erhalten, um sofort
+              loszulegen. Erkunde die Features und füge dann deine eigenen Bot-Tokens hinzu!
+            </AlertDescription>
+          </Alert>
+        )}
+
         <ConfigCheck onValidationComplete={(result) => setConfigValid(result.valid)} />
+
+        <PublicRegistrationInfo />
 
         {/* Debug Info für Entwicklung */}
         {debugInfo && (
@@ -349,7 +366,7 @@ export default function DashboardPage() {
         {/* Sidebar */}
         <div className="w-64 bg-white border-r min-h-screen p-4">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="font-semibold">Meine Bots</h2>
+            <h2 className="font-semibold">Meine Bots ({bots.length})</h2>
             <Button size="sm" onClick={() => setShowAddBot(true)}>
               <Plus className="h-4 w-4" />
             </Button>
@@ -407,6 +424,14 @@ export default function DashboardPage() {
                 </div>
               </div>
             ))}
+
+            {bots.length === 0 && (
+              <div className="text-center py-8 text-gray-500">
+                <Bot className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p className="text-sm">Noch keine Bots</p>
+                <p className="text-xs">Klicke auf + um zu starten</p>
+              </div>
+            )}
           </div>
         </div>
 
@@ -627,8 +652,14 @@ export default function DashboardPage() {
           ) : (
             <div className="text-center py-12">
               <Bot className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 mb-2">Kein Bot ausgewählt</h3>
-              <p className="text-gray-600">Wähle einen Bot aus der Seitenleiste aus oder erstelle einen neuen Bot.</p>
+              <h3 className="text-lg font-medium text-gray-900 mb-2">
+                {bots.length === 0 ? "Willkommen bei BotHost!" : "Kein Bot ausgewählt"}
+              </h3>
+              <p className="text-gray-600">
+                {bots.length === 0
+                  ? "Du hast automatisch Demo-Bots erhalten. Wähle einen aus der Seitenleiste aus!"
+                  : "Wähle einen Bot aus der Seitenleiste aus oder erstelle einen neuen Bot."}
+              </p>
             </div>
           )}
         </div>
