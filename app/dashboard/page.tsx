@@ -9,12 +9,11 @@ import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
-import { Bot, Plus, Activity, Users, MessageSquare, Shield, LogOut } from "lucide-react"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Bot, Plus, Activity, Users, MessageSquare, Shield, LogOut, Info } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { BotManager } from "@/lib/bot-manager"
 import { ConfigCheck } from "@/components/config-check"
-// Entferne diese Zeile:
-// import { AdminSetup } from "@/components/admin-setup"
 
 interface BotConfig {
   id: string
@@ -39,17 +38,23 @@ export default function DashboardPage() {
   const [newBotToken, setNewBotToken] = useState("")
   const [newBotName, setNewBotName] = useState("")
   const [isLoading, setIsLoading] = useState(true)
+  const [debugInfo, setDebugInfo] = useState<any>(null)
   const router = useRouter()
   const [botManager] = useState(() => BotManager.getInstance())
   const [configValid, setConfigValid] = useState(false)
 
   useEffect(() => {
     checkUser()
+    // Debug-Info alle 5 Sekunden aktualisieren
+    const debugInterval = setInterval(() => {
+      setDebugInfo(botManager.getDebugInfo())
+    }, 5000)
+
+    return () => clearInterval(debugInterval)
   }, [])
 
   const checkUser = async () => {
     try {
-      // Only import and use Supabase on the client side
       const { createClient } = await import("@/lib/supabase")
       const supabase = createClient()
 
@@ -83,7 +88,6 @@ export default function DashboardPage() {
 
       if (!user) return
 
-      // Lade Bots aus der echten Datenbank
       const { data: botsData, error } = await supabase
         .from("bots")
         .select(`
@@ -99,7 +103,6 @@ export default function DashboardPage() {
         return
       }
 
-      // Konvertiere DB-Daten zu BotConfig Format
       const formattedBots: BotConfig[] = botsData.map((bot) => ({
         id: bot.id,
         name: bot.name,
@@ -128,6 +131,9 @@ export default function DashboardPage() {
 
   const handleLogout = async () => {
     try {
+      // Alle Bots stoppen vor Logout
+      await botManager.stopAllBots()
+
       const { createClient } = await import("@/lib/supabase")
       const supabase = createClient()
       await supabase.auth.signOut()
@@ -141,13 +147,6 @@ export default function DashboardPage() {
   const addBot = async () => {
     if (!newBotToken || !newBotName) return
 
-    // Entferne die Token-Validierung komplett
-    // const tokenValidation = await botManager.validateToken(newBotToken)
-    // if (!tokenValidation.valid) {
-    //   alert(`Token-Fehler: ${tokenValidation.error}`)
-    //   return
-    // }
-
     try {
       const { createClient } = await import("@/lib/supabase")
       const supabase = createClient()
@@ -157,7 +156,6 @@ export default function DashboardPage() {
       } = await supabase.auth.getUser()
       if (!user) return
 
-      // Bot in Datenbank speichern
       const { data: newBotData, error } = await supabase
         .from("bots")
         .insert([
@@ -180,7 +178,6 @@ export default function DashboardPage() {
         return
       }
 
-      // Neuen Bot zu lokaler Liste hinzufügen
       const newBot: BotConfig = {
         id: newBotData.id,
         name: newBotData.name,
@@ -212,7 +209,6 @@ export default function DashboardPage() {
       const { createClient } = await import("@/lib/supabase")
       const supabase = createClient()
 
-      // Bot in Datenbank aktualisieren
       const { error } = await supabase
         .from("bots")
         .update({
@@ -228,15 +224,12 @@ export default function DashboardPage() {
 
       if (error) {
         console.error("Error updating bot:", error)
-        // Trotzdem lokal aktualisieren
       }
 
-      // Lokal aktualisieren
       setBots(bots.map((bot) => (bot.id === selectedBot.id ? updatedBot : bot)))
       setSelectedBot(updatedBot)
     } catch (error) {
       console.error("Error in updateBot:", error)
-      // Fallback: nur lokal aktualisieren
       setBots(bots.map((bot) => (bot.id === selectedBot.id ? updatedBot : bot)))
       setSelectedBot(updatedBot)
     }
@@ -245,20 +238,23 @@ export default function DashboardPage() {
   const toggleBotStatus = async () => {
     if (!selectedBot) return
 
-    if (selectedBot.status === "online") {
+    if (selectedBot.status === "online" || selectedBot.status === "starting") {
+      // Bot stoppen
+      updateBot({ status: "offline" })
       const result = await botManager.stopBot(selectedBot.id)
       if (!result.success) {
-        alert(`Bot-Stop fehlgeschlagen: ${result.error}`)
-        return
+        console.error(`Bot-Stop Warnung: ${result.error}`)
+        // Trotzdem als offline markieren
       }
-      updateBot({ status: "offline" })
     } else {
+      // Bot starten
+      updateBot({ status: "starting" })
       const result = await botManager.startBot(selectedBot)
       if (!result.success) {
         alert(`Bot-Start fehlgeschlagen: ${result.error}`)
+        updateBot({ status: "offline" })
         return
       }
-      updateBot({ status: "starting" })
 
       // Status-Updates vom BotManager abonnieren
       const checkStatus = () => {
@@ -266,13 +262,13 @@ export default function DashboardPage() {
         if (botStatus && botStatus.status !== selectedBot.status) {
           updateBot({ status: botStatus.status })
           if (botStatus.error) {
-            alert(`Bot-Fehler: ${botStatus.error}`)
+            console.error(`Bot-Fehler: ${botStatus.error}`)
           }
         }
       }
 
       const interval = setInterval(checkStatus, 1000)
-      setTimeout(() => clearInterval(interval), 10000) // 10 Sekunden überwachen
+      setTimeout(() => clearInterval(interval), 15000) // 15 Sekunden überwachen
     }
   }
 
@@ -298,19 +294,6 @@ export default function DashboardPage() {
     updateBot({ customCommands: newCommands })
   }
 
-  useEffect(() => {
-    const handleDatabaseSetup = () => {
-      // Reload bots after database setup
-      loadBots()
-    }
-
-    window.addEventListener("database-setup-complete", handleDatabaseSetup)
-
-    return () => {
-      window.removeEventListener("database-setup-complete", handleDatabaseSetup)
-    }
-  }, [])
-
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -323,7 +306,7 @@ export default function DashboardPage() {
   }
 
   if (!user) {
-    return null // Will redirect to login
+    return null
   }
 
   return (
@@ -347,8 +330,19 @@ export default function DashboardPage() {
 
       <div className="p-6">
         <ConfigCheck onValidationComplete={(result) => setConfigValid(result.valid)} />
-        {/* Entferne diese Zeile: */}
-        {/* <AdminSetup user={user} /> */}
+
+        {/* Debug Info für Entwicklung */}
+        {debugInfo && (
+          <Alert className="mb-4">
+            <Info className="h-4 w-4" />
+            <AlertDescription>
+              <strong>Debug:</strong> {debugInfo.bots} Bots, {debugInfo.workers} Workers aktiv
+              {debugInfo.botIds.length > 0 && (
+                <div className="text-xs mt-1">Bot IDs: {debugInfo.botIds.join(", ")}</div>
+              )}
+            </AlertDescription>
+          </Alert>
+        )}
       </div>
 
       <div className="flex">
@@ -425,8 +419,8 @@ export default function DashboardPage() {
                   <h2 className="text-2xl font-bold">{selectedBot.name}</h2>
                   <p className="text-gray-600">Bot Konfiguration</p>
                 </div>
-                <Button onClick={toggleBotStatus}>
-                  {selectedBot.status === "online" ? "Bot stoppen" : "Bot starten"}
+                <Button onClick={toggleBotStatus} disabled={selectedBot.status === "starting"}>
+                  {selectedBot.status === "online" || selectedBot.status === "starting" ? "Bot stoppen" : "Bot starten"}
                 </Button>
               </div>
 
