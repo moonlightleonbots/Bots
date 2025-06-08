@@ -9,12 +9,11 @@ import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Bot, Plus, Activity, Users, MessageSquare, Shield, LogOut, Info, Sparkles } from "lucide-react"
+import { Bot, Plus, Activity, Users, MessageSquare, Shield, LogOut } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { BotManager } from "@/lib/bot-manager"
+import { ConfigValidator } from "@/lib/config-validator"
 import { ConfigCheck } from "@/components/config-check"
-import { PublicRegistrationInfo } from "@/components/public-registration-info"
 
 interface BotConfig {
   id: string
@@ -39,23 +38,17 @@ export default function DashboardPage() {
   const [newBotToken, setNewBotToken] = useState("")
   const [newBotName, setNewBotName] = useState("")
   const [isLoading, setIsLoading] = useState(true)
-  const [debugInfo, setDebugInfo] = useState<any>(null)
-  const [isNewUser, setIsNewUser] = useState(false)
   const router = useRouter()
   const [botManager] = useState(() => BotManager.getInstance())
   const [configValid, setConfigValid] = useState(false)
 
   useEffect(() => {
     checkUser()
-    const debugInterval = setInterval(() => {
-      setDebugInfo(botManager.getDebugInfo())
-    }, 5000)
-
-    return () => clearInterval(debugInterval)
   }, [])
 
   const checkUser = async () => {
     try {
+      // Only import and use Supabase on the client side
       const { createClient } = await import("@/lib/supabase")
       const supabase = createClient()
 
@@ -69,13 +62,6 @@ export default function DashboardPage() {
       }
 
       setUser(user)
-
-      // Prüfe ob der User neu ist (weniger als 5 Minuten registriert)
-      const userCreated = new Date(user.created_at)
-      const now = new Date()
-      const diffMinutes = (now.getTime() - userCreated.getTime()) / (1000 * 60)
-      setIsNewUser(diffMinutes < 5)
-
       loadBots()
     } catch (error) {
       console.error("Auth error:", error)
@@ -85,62 +71,32 @@ export default function DashboardPage() {
     }
   }
 
-  const loadBots = async () => {
-    try {
-      const { createClient } = await import("@/lib/supabase")
-      const supabase = createClient()
-
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-
-      if (!user) return
-
-      const { data: botsData, error } = await supabase
-        .from("bots")
-        .select(`
-        *,
-        custom_commands (*)
-      `)
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false })
-
-      if (error) {
-        console.error("Error loading bots:", error)
-        setBots([])
-        return
-      }
-
-      const formattedBots: BotConfig[] = botsData.map((bot) => ({
-        id: bot.id,
-        name: bot.name,
-        token: bot.token,
-        status: bot.status as "online" | "offline" | "starting" | "error",
-        prefix: bot.prefix,
-        welcomeMessage: bot.welcome_message || "",
-        moderationEnabled: bot.moderation_enabled,
-        autoRoleEnabled: bot.auto_role_enabled,
-        customCommands:
-          bot.custom_commands?.map((cmd: any) => ({
-            trigger: cmd.trigger,
-            response: cmd.response,
-          })) || [],
-      }))
-
-      setBots(formattedBots)
-      if (formattedBots.length > 0) {
-        setSelectedBot(formattedBots[0])
-      }
-    } catch (error) {
-      console.error("Error in loadBots:", error)
-      setBots([])
+  const loadBots = () => {
+    // Simulierte Bot-Daten
+    const mockBots: BotConfig[] = [
+      {
+        id: "1",
+        name: "MeinBot",
+        token: "MTIzNDU2Nzg5MDEyMzQ1Njc4OTA.XXXXXX.XXXXXXXXXXXXXXXXXXXXXXXXXX",
+        status: "online",
+        prefix: "!",
+        welcomeMessage: "Willkommen auf dem Server!",
+        moderationEnabled: true,
+        autoRoleEnabled: false,
+        customCommands: [
+          { trigger: "ping", response: "Pong!" },
+          { trigger: "info", response: "Das ist mein Discord Bot!" },
+        ],
+      },
+    ]
+    setBots(mockBots)
+    if (mockBots.length > 0) {
+      setSelectedBot(mockBots[0])
     }
   }
 
   const handleLogout = async () => {
     try {
-      await botManager.stopAllBots()
-
       const { createClient } = await import("@/lib/supabase")
       const supabase = createClient()
       await supabase.auth.signOut()
@@ -154,124 +110,78 @@ export default function DashboardPage() {
   const addBot = async () => {
     if (!newBotToken || !newBotName) return
 
-    try {
-      const { createClient } = await import("@/lib/supabase")
-      const supabase = createClient()
-
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-      if (!user) return
-
-      const { data: newBotData, error } = await supabase
-        .from("bots")
-        .insert([
-          {
-            user_id: user.id,
-            name: newBotName,
-            token: newBotToken,
-            status: "offline",
-            prefix: "!",
-            welcome_message: "Willkommen!",
-            moderation_enabled: false,
-            auto_role_enabled: false,
-          },
-        ])
-        .select()
-        .single()
-
-      if (error) {
-        alert(`Fehler beim Speichern: ${error.message}`)
-        return
-      }
-
-      const newBot: BotConfig = {
-        id: newBotData.id,
-        name: newBotData.name,
-        token: newBotData.token,
-        status: newBotData.status,
-        prefix: newBotData.prefix,
-        welcomeMessage: newBotData.welcome_message || "",
-        moderationEnabled: newBotData.moderation_enabled,
-        autoRoleEnabled: newBotData.auto_role_enabled,
-        customCommands: [],
-      }
-
-      setBots([...bots, newBot])
-      setSelectedBot(newBot)
-      setShowAddBot(false)
-      setNewBotToken("")
-      setNewBotName("")
-    } catch (error) {
-      alert(`Fehler: ${error}`)
+    // Token validieren
+    const tokenValidation = await botManager.validateToken(newBotToken)
+    if (!tokenValidation.valid) {
+      alert(`Token-Fehler: ${tokenValidation.error}`)
+      return
     }
+
+    const newBot: BotConfig = {
+      id: Date.now().toString(),
+      name: newBotName,
+      token: newBotToken,
+      status: "offline",
+      prefix: "!",
+      welcomeMessage: "Willkommen!",
+      moderationEnabled: false,
+      autoRoleEnabled: false,
+      customCommands: [],
+    }
+
+    // Bot-Konfiguration validieren
+    const configValidation = ConfigValidator.validateBotConfig(newBot)
+    if (!configValidation.valid) {
+      alert(`Konfigurationsfehler: ${configValidation.errors.join(", ")}`)
+      return
+    }
+
+    setBots([...bots, newBot])
+    setSelectedBot(newBot)
+    setShowAddBot(false)
+    setNewBotToken("")
+    setNewBotName("")
   }
 
-  const updateBot = async (updates: Partial<BotConfig>) => {
+  const updateBot = (updates: Partial<BotConfig>) => {
     if (!selectedBot) return
 
     const updatedBot = { ...selectedBot, ...updates }
-
-    try {
-      const { createClient } = await import("@/lib/supabase")
-      const supabase = createClient()
-
-      const { error } = await supabase
-        .from("bots")
-        .update({
-          name: updatedBot.name,
-          prefix: updatedBot.prefix,
-          welcome_message: updatedBot.welcomeMessage,
-          moderation_enabled: updatedBot.moderationEnabled,
-          auto_role_enabled: updatedBot.autoRoleEnabled,
-          status: updatedBot.status,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", selectedBot.id)
-
-      if (error) {
-        console.error("Error updating bot:", error)
-      }
-
-      setBots(bots.map((bot) => (bot.id === selectedBot.id ? updatedBot : bot)))
-      setSelectedBot(updatedBot)
-    } catch (error) {
-      console.error("Error in updateBot:", error)
-      setBots(bots.map((bot) => (bot.id === selectedBot.id ? updatedBot : bot)))
-      setSelectedBot(updatedBot)
-    }
+    setBots(bots.map((bot) => (bot.id === selectedBot.id ? updatedBot : bot)))
+    setSelectedBot(updatedBot)
   }
 
   const toggleBotStatus = async () => {
     if (!selectedBot) return
 
-    if (selectedBot.status === "online" || selectedBot.status === "starting") {
-      updateBot({ status: "offline" })
+    if (selectedBot.status === "online") {
       const result = await botManager.stopBot(selectedBot.id)
       if (!result.success) {
-        console.error(`Bot-Stop Warnung: ${result.error}`)
+        alert(`Bot-Stop fehlgeschlagen: ${result.error}`)
+        return
       }
+      updateBot({ status: "offline" })
     } else {
-      updateBot({ status: "starting" })
       const result = await botManager.startBot(selectedBot)
       if (!result.success) {
         alert(`Bot-Start fehlgeschlagen: ${result.error}`)
-        updateBot({ status: "offline" })
         return
       }
+      updateBot({ status: "starting" })
 
+      // Status-Updates vom BotManager abonnieren
       const checkStatus = () => {
         const botStatus = botManager.getBotStatus(selectedBot.id)
         if (botStatus && botStatus.status !== selectedBot.status) {
           updateBot({ status: botStatus.status })
           if (botStatus.error) {
-            console.error(`Bot-Fehler: ${botStatus.error}`)
+            alert(`Bot-Fehler: ${botStatus.error}`)
           }
         }
       }
 
       const interval = setInterval(checkStatus, 1000)
-      setTimeout(() => clearInterval(interval), 15000)
+      setTimeout(() => clearInterval(interval), 10000) // 10 Sekunden überwachen
     }
   }
 
@@ -309,7 +219,7 @@ export default function DashboardPage() {
   }
 
   if (!user) {
-    return null
+    return null // Will redirect to login
   }
 
   return (
@@ -320,7 +230,6 @@ export default function DashboardPage() {
           <div className="flex items-center space-x-4">
             <Bot className="h-8 w-8 text-indigo-600" />
             <h1 className="text-2xl font-bold">BotHost Dashboard</h1>
-            {isNewUser && <Badge variant="secondary">Neu!</Badge>}
           </div>
           <div className="flex items-center space-x-4">
             <span className="text-sm text-gray-600">Hallo, {user.user_metadata?.full_name || user.email}</span>
@@ -333,40 +242,14 @@ export default function DashboardPage() {
       </header>
 
       <div className="p-6">
-        {/* Willkommensnachricht für neue Benutzer */}
-        {isNewUser && (
-          <Alert className="mb-6">
-            <Sparkles className="h-4 w-4" />
-            <AlertDescription>
-              <strong>Willkommen bei BotHost! 🎉</strong> Du hast automatisch 3 Demo-Bots erhalten, um sofort
-              loszulegen. Erkunde die Features und füge dann deine eigenen Bot-Tokens hinzu!
-            </AlertDescription>
-          </Alert>
-        )}
-
         <ConfigCheck onValidationComplete={(result) => setConfigValid(result.valid)} />
-
-        <PublicRegistrationInfo />
-
-        {/* Debug Info für Entwicklung */}
-        {debugInfo && (
-          <Alert className="mb-4">
-            <Info className="h-4 w-4" />
-            <AlertDescription>
-              <strong>Debug:</strong> {debugInfo.bots} Bots, {debugInfo.workers} Workers aktiv
-              {debugInfo.botIds.length > 0 && (
-                <div className="text-xs mt-1">Bot IDs: {debugInfo.botIds.join(", ")}</div>
-              )}
-            </AlertDescription>
-          </Alert>
-        )}
       </div>
 
       <div className="flex">
         {/* Sidebar */}
         <div className="w-64 bg-white border-r min-h-screen p-4">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="font-semibold">Meine Bots ({bots.length})</h2>
+            <h2 className="font-semibold">Meine Bots</h2>
             <Button size="sm" onClick={() => setShowAddBot(true)}>
               <Plus className="h-4 w-4" />
             </Button>
@@ -424,14 +307,6 @@ export default function DashboardPage() {
                 </div>
               </div>
             ))}
-
-            {bots.length === 0 && (
-              <div className="text-center py-8 text-gray-500">
-                <Bot className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                <p className="text-sm">Noch keine Bots</p>
-                <p className="text-xs">Klicke auf + um zu starten</p>
-              </div>
-            )}
           </div>
         </div>
 
@@ -444,8 +319,8 @@ export default function DashboardPage() {
                   <h2 className="text-2xl font-bold">{selectedBot.name}</h2>
                   <p className="text-gray-600">Bot Konfiguration</p>
                 </div>
-                <Button onClick={toggleBotStatus} disabled={selectedBot.status === "starting"}>
-                  {selectedBot.status === "online" || selectedBot.status === "starting" ? "Bot stoppen" : "Bot starten"}
+                <Button onClick={toggleBotStatus}>
+                  {selectedBot.status === "online" ? "Bot stoppen" : "Bot starten"}
                 </Button>
               </div>
 
@@ -652,14 +527,8 @@ export default function DashboardPage() {
           ) : (
             <div className="text-center py-12">
               <Bot className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 mb-2">
-                {bots.length === 0 ? "Willkommen bei BotHost!" : "Kein Bot ausgewählt"}
-              </h3>
-              <p className="text-gray-600">
-                {bots.length === 0
-                  ? "Du hast automatisch Demo-Bots erhalten. Wähle einen aus der Seitenleiste aus!"
-                  : "Wähle einen Bot aus der Seitenleiste aus oder erstelle einen neuen Bot."}
-              </p>
+              <h3 className="text-lg font-medium text-gray-900 mb-2">Kein Bot ausgewählt</h3>
+              <p className="text-gray-600">Wähle einen Bot aus der Seitenleiste aus oder erstelle einen neuen Bot.</p>
             </div>
           )}
         </div>

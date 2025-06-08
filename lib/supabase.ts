@@ -1,7 +1,6 @@
 import { createBrowserClient } from "@supabase/ssr"
 
 export function createClient() {
-  // Verwende die korrekte Supabase-URL
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://cubmcmzhmskcrfvrlmcc.supabase.co"
   const supabaseAnonKey =
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
@@ -10,8 +9,6 @@ export function createClient() {
   if (!supabaseUrl || !supabaseAnonKey) {
     throw new Error("Missing Supabase environment variables")
   }
-
-  console.log("Using Supabase URL:", supabaseUrl) // Debug-Log
 
   return createBrowserClient(supabaseUrl, supabaseAnonKey)
 }

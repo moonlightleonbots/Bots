@@ -7,7 +7,6 @@ export interface BotInstance {
   status: "starting" | "online" | "offline" | "error"
   error?: string
   client?: any
-  startedAt?: Date
 }
 
 export class BotManager {
@@ -22,16 +21,86 @@ export class BotManager {
     return BotManager.instance
   }
 
-  async startBot(botConfig: any): Promise<{ success: boolean; error?: string }> {
+  async validateToken(token: string): Promise<{ valid: boolean; error?: string; botInfo?: any }> {
     try {
-      // Prüfe ob Bot bereits läuft
-      const existingBot = this.bots.get(botConfig.id)
-      if (existingBot && existingBot.status === "online") {
-        return { success: false, error: "Bot läuft bereits" }
+      // Basis-Token-Format-Check
+      if (!token || typeof token !== "string") {
+        return { valid: false, error: "Token ist leer oder ungültig" }
       }
 
-      // Stoppe existierenden Worker falls vorhanden
-      await this.stopBot(botConfig.id)
+      // Discord Token Format Check
+      const tokenParts = token.split(".")
+      if (tokenParts.length !== 3) {
+        return { valid: false, error: "Token hat falsches Format (muss 3 Teile haben)" }
+      }
+
+      // Bot ID aus Token extrahieren
+      try {
+        const botId = atob(tokenParts[0])
+        if (!botId || isNaN(Number(botId))) {
+          return { valid: false, error: "Bot ID im Token ist ungültig" }
+        }
+      } catch {
+        return { valid: false, error: "Token ist nicht Base64-kodiert" }
+      }
+
+      // Simuliere Discord API-Aufruf zur Token-Validierung
+      const response = await this.testTokenWithDiscord(token)
+      return response
+    } catch (error) {
+      return { valid: false, error: `Token-Validierung fehlgeschlagen: ${error}` }
+    }
+  }
+
+  private async testTokenWithDiscord(token: string): Promise<{ valid: boolean; error?: string; botInfo?: any }> {
+    try {
+      // Simuliere Discord API /users/@me Aufruf
+      const response = await fetch("https://discord.com/api/v10/users/@me", {
+        headers: {
+          Authorization: `Bot ${token}`,
+        },
+      })
+
+      if (!response.ok) {
+        switch (response.status) {
+          case 401:
+            return { valid: false, error: "Token ist ungültig oder abgelaufen" }
+          case 403:
+            return { valid: false, error: "Token hat keine ausreichenden Berechtigungen" }
+          case 429:
+            return { valid: false, error: "Rate Limit erreicht, versuche es später erneut" }
+          default:
+            return { valid: false, error: `Discord API Fehler: ${response.status}` }
+        }
+      }
+
+      const botInfo = await response.json()
+
+      if (!botInfo.bot) {
+        return { valid: false, error: "Token gehört zu einem User-Account, nicht zu einem Bot" }
+      }
+
+      return {
+        valid: true,
+        botInfo: {
+          id: botInfo.id,
+          username: botInfo.username,
+          discriminator: botInfo.discriminator,
+          avatar: botInfo.avatar,
+        },
+      }
+    } catch (error) {
+      return { valid: false, error: "Netzwerkfehler bei Token-Validierung" }
+    }
+  }
+
+  async startBot(botConfig: any): Promise<{ success: boolean; error?: string }> {
+    try {
+      // Token validieren
+      const tokenValidation = await this.validateToken(botConfig.token)
+      if (!tokenValidation.valid) {
+        return { success: false, error: tokenValidation.error }
+      }
 
       // Bot-Status auf "starting" setzen
       const botInstance: BotInstance = {
@@ -39,7 +108,6 @@ export class BotManager {
         name: botConfig.name,
         token: botConfig.token,
         status: "starting",
-        startedAt: new Date(),
       }
 
       this.bots.set(botConfig.id, botInstance)
@@ -52,39 +120,30 @@ export class BotManager {
               `
               // Discord Bot Worker
               let client = null;
-              let botId = null;
               
               self.onmessage = async function(e) {
                 const { type, config } = e.data;
                 
                 if (type === 'START_BOT') {
-                  botId = config.id;
                   try {
                     // Simuliere Bot-Start (in echter Implementierung würde hier Discord.js laufen)
-                    self.postMessage({
-                      type: 'BOT_STATUS',
-                      botId: botId,
-                      status: 'starting',
-                      message: 'Bot wird gestartet...'
-                    });
-                    
                     await new Promise(resolve => setTimeout(resolve, 2000));
                     
                     // Simuliere erfolgreichen Bot-Start
                     self.postMessage({
                       type: 'BOT_READY',
-                      botId: botId,
+                      botId: config.id,
                       data: {
-                        username: config.name,
-                        guilds: Math.floor(Math.random() * 10) + 1,
-                        users: Math.floor(Math.random() * 1000) + 100
+                        username: 'TestBot',
+                        guilds: 5,
+                        users: 1250
                       }
                     });
                     
                   } catch (error) {
                     self.postMessage({
                       type: 'BOT_ERROR',
-                      botId: botId,
+                      botId: config.id,
                       error: error.message
                     });
                   }
@@ -93,30 +152,9 @@ export class BotManager {
                 if (type === 'STOP_BOT') {
                   self.postMessage({
                     type: 'BOT_STOPPED',
-                    botId: botId || config.id
-                  });
-                  
-                  // Worker beenden
-                  setTimeout(() => {
-                    self.close();
-                  }, 100);
-                }
-                
-                if (type === 'PING') {
-                  self.postMessage({
-                    type: 'PONG',
-                    botId: botId || config.id
+                    botId: config.id
                   });
                 }
-              };
-              
-              // Fehlerbehandlung
-              self.onerror = function(error) {
-                self.postMessage({
-                  type: 'BOT_ERROR',
-                  botId: botId,
-                  error: 'Worker Error: ' + error.message
-                });
               };
             `,
             ],
@@ -127,61 +165,30 @@ export class BotManager {
 
       // Worker Event Listener
       worker.onmessage = (e) => {
-        const { type, botId, data, error, status, message } = e.data
+        const { type, botId, data, error } = e.data
 
         const bot = this.bots.get(botId)
         if (!bot) return
 
         switch (type) {
-          case "BOT_STATUS":
-            bot.status = status
-            if (message) {
-              console.log(`Bot ${botId}: ${message}`)
-            }
-            this.bots.set(botId, bot)
-            break
-
           case "BOT_READY":
             bot.status = "online"
             bot.error = undefined
             this.bots.set(botId, bot)
-            console.log(`Bot ${bot.name} ist online!`, data)
             break
 
           case "BOT_ERROR":
             bot.status = "error"
             bot.error = error
             this.bots.set(botId, bot)
-            console.error(`Bot ${bot.name} Fehler:`, error)
             break
 
           case "BOT_STOPPED":
             bot.status = "offline"
             bot.error = undefined
             this.bots.set(botId, bot)
-            console.log(`Bot ${bot.name} gestoppt`)
-            break
-
-          case "PONG":
-            console.log(`Bot ${botId} antwortet auf Ping`)
             break
         }
-      }
-
-      // Worker Error Handler
-      worker.onerror = (error) => {
-        console.error(`Worker Error für Bot ${botConfig.id}:`, error)
-        const bot = this.bots.get(botConfig.id)
-        if (bot) {
-          bot.status = "error"
-          bot.error = `Worker Fehler: ${error.message}`
-          this.bots.set(botConfig.id, bot)
-        }
-      }
-
-      // Worker beendet Handler
-      worker.onmessageerror = (error) => {
-        console.error(`Worker Message Error für Bot ${botConfig.id}:`, error)
       }
 
       this.workers.set(botConfig.id, worker)
@@ -194,62 +201,27 @@ export class BotManager {
 
       return { success: true }
     } catch (error) {
-      console.error("Fehler beim Bot-Start:", error)
       return { success: false, error: `Bot-Start fehlgeschlagen: ${error}` }
     }
   }
 
   async stopBot(botId: string): Promise<{ success: boolean; error?: string }> {
     try {
-      const bot = this.bots.get(botId)
       const worker = this.workers.get(botId)
-
-      // Wenn kein Worker vorhanden, aber Bot existiert, setze Status auf offline
-      if (!worker && bot) {
-        bot.status = "offline"
-        bot.error = undefined
-        this.bots.set(botId, bot)
-        return { success: true }
+      if (!worker) {
+        return { success: false, error: "Bot-Worker nicht gefunden" }
       }
 
-      // Wenn weder Worker noch Bot vorhanden
-      if (!worker && !bot) {
-        return { success: false, error: "Bot nicht gefunden" }
-      }
+      worker.postMessage({ type: "STOP_BOT" })
 
-      // Worker stoppen
-      if (worker) {
-        try {
-          // Versuche graceful shutdown
-          worker.postMessage({ type: "STOP_BOT", config: { id: botId } })
-
-          // Fallback: Worker nach Timeout beenden
-          setTimeout(() => {
-            try {
-              worker.terminate()
-            } catch (e) {
-              console.warn("Worker bereits beendet:", e)
-            }
-            this.workers.delete(botId)
-          }, 2000)
-        } catch (error) {
-          console.warn("Fehler beim Worker-Stop:", error)
-          // Trotzdem Worker aus Map entfernen
-          worker.terminate()
-          this.workers.delete(botId)
-        }
-      }
-
-      // Bot-Status aktualisieren
-      if (bot) {
-        bot.status = "offline"
-        bot.error = undefined
-        this.bots.set(botId, bot)
-      }
+      // Worker nach kurzer Zeit beenden
+      setTimeout(() => {
+        worker.terminate()
+        this.workers.delete(botId)
+      }, 1000)
 
       return { success: true }
     } catch (error) {
-      console.error("Fehler beim Bot-Stop:", error)
       return { success: false, error: `Bot-Stop fehlgeschlagen: ${error}` }
     }
   }
@@ -260,42 +232,5 @@ export class BotManager {
 
   getAllBots(): BotInstance[] {
     return Array.from(this.bots.values())
-  }
-
-  // Neue Methoden für bessere Verwaltung
-  isWorkerRunning(botId: string): boolean {
-    return this.workers.has(botId)
-  }
-
-  async pingBot(botId: string): Promise<boolean> {
-    const worker = this.workers.get(botId)
-    if (!worker) return false
-
-    try {
-      worker.postMessage({ type: "PING", config: { id: botId } })
-      return true
-    } catch {
-      return false
-    }
-  }
-
-  stopAllBots(): Promise<void> {
-    const stopPromises = Array.from(this.bots.keys()).map((botId) => this.stopBot(botId))
-    return Promise.all(stopPromises).then(() => {})
-  }
-
-  // Debug-Informationen
-  getDebugInfo(): {
-    bots: number
-    workers: number
-    botIds: string[]
-    workerIds: string[]
-  } {
-    return {
-      bots: this.bots.size,
-      workers: this.workers.size,
-      botIds: Array.from(this.bots.keys()),
-      workerIds: Array.from(this.workers.keys()),
-    }
   }
 }
