@@ -4,8 +4,13 @@ import { useState, useEffect } from "react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { AlertTriangle, CheckCircle, XCircle, RefreshCw } from "lucide-react"
-import { ConfigValidator, type ConfigValidationResult } from "@/lib/config-validator"
+import { CheckCircle, XCircle, RefreshCw, Database } from "lucide-react"
+
+interface ConfigValidationResult {
+  valid: boolean
+  errors: string[]
+  warnings: string[]
+}
 
 interface ConfigCheckProps {
   onValidationComplete?: (result: ConfigValidationResult) => void
@@ -18,7 +23,45 @@ export function ConfigCheck({ onValidationComplete }: ConfigCheckProps) {
   const runValidation = async () => {
     setIsChecking(true)
     try {
-      const result = await ConfigValidator.validateEnvironment()
+      const errors: string[] = []
+      const warnings: string[] = []
+
+      // Supabase Konfiguration prüfen
+      const supabaseUrl = "https://cubmcmzhmskcrfvrlmcc.supabase.co"
+      const supabaseKey =
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN1Ym1jbXpobXNrY3JmdnJsbWNjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDkzMDEzNDIsImV4cCI6MjA2NDg3NzM0Mn0.2eBgMujDLJ-Wf0QekVg3SFO-c9bnEZuu5aYDNtcNUO4"
+
+      if (!supabaseUrl) {
+        errors.push("NEXT_PUBLIC_SUPABASE_URL ist nicht konfiguriert")
+      }
+
+      if (!supabaseKey) {
+        errors.push("NEXT_PUBLIC_SUPABASE_ANON_KEY ist nicht konfiguriert")
+      }
+
+      // Supabase-Verbindung testen
+      try {
+        const { createClient } = await import("@/lib/supabase")
+        const supabase = createClient()
+
+        const { data, error } = await supabase.from("bots").select("count").limit(1)
+        if (error) {
+          if (error.message.includes("relation") && error.message.includes("does not exist")) {
+            errors.push("Datenbank-Tabellen sind nicht erstellt. Führe das SQL-Script aus.")
+          } else {
+            errors.push(`Datenbank-Verbindung fehlgeschlagen: ${error.message}`)
+          }
+        }
+      } catch (error) {
+        errors.push(`Supabase-Client konnte nicht erstellt werden: ${error}`)
+      }
+
+      const result = {
+        valid: errors.length === 0,
+        errors,
+        warnings,
+      }
+
       setValidation(result)
       onValidationComplete?.(result)
     } catch (error) {
@@ -78,7 +121,7 @@ export function ConfigCheck({ onValidationComplete }: ConfigCheckProps) {
 
         {validation?.warnings && validation.warnings.length > 0 && (
           <Alert>
-            <AlertTriangle className="h-4 w-4" />
+            <Database className="h-4 w-4" />
             <AlertTitle>Warnungen</AlertTitle>
             <AlertDescription>
               <ul className="list-disc list-inside space-y-1">

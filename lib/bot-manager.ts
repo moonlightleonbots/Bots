@@ -21,87 +21,8 @@ export class BotManager {
     return BotManager.instance
   }
 
-  async validateToken(token: string): Promise<{ valid: boolean; error?: string; botInfo?: any }> {
-    try {
-      // Basis-Token-Format-Check
-      if (!token || typeof token !== "string") {
-        return { valid: false, error: "Token ist leer oder ungültig" }
-      }
-
-      // Discord Token Format Check
-      const tokenParts = token.split(".")
-      if (tokenParts.length !== 3) {
-        return { valid: false, error: "Token hat falsches Format (muss 3 Teile haben)" }
-      }
-
-      // Bot ID aus Token extrahieren
-      try {
-        const botId = atob(tokenParts[0])
-        if (!botId || isNaN(Number(botId))) {
-          return { valid: false, error: "Bot ID im Token ist ungültig" }
-        }
-      } catch {
-        return { valid: false, error: "Token ist nicht Base64-kodiert" }
-      }
-
-      // Simuliere Discord API-Aufruf zur Token-Validierung
-      const response = await this.testTokenWithDiscord(token)
-      return response
-    } catch (error) {
-      return { valid: false, error: `Token-Validierung fehlgeschlagen: ${error}` }
-    }
-  }
-
-  private async testTokenWithDiscord(token: string): Promise<{ valid: boolean; error?: string; botInfo?: any }> {
-    try {
-      // Simuliere Discord API /users/@me Aufruf
-      const response = await fetch("https://discord.com/api/v10/users/@me", {
-        headers: {
-          Authorization: `Bot ${token}`,
-        },
-      })
-
-      if (!response.ok) {
-        switch (response.status) {
-          case 401:
-            return { valid: false, error: "Token ist ungültig oder abgelaufen" }
-          case 403:
-            return { valid: false, error: "Token hat keine ausreichenden Berechtigungen" }
-          case 429:
-            return { valid: false, error: "Rate Limit erreicht, versuche es später erneut" }
-          default:
-            return { valid: false, error: `Discord API Fehler: ${response.status}` }
-        }
-      }
-
-      const botInfo = await response.json()
-
-      if (!botInfo.bot) {
-        return { valid: false, error: "Token gehört zu einem User-Account, nicht zu einem Bot" }
-      }
-
-      return {
-        valid: true,
-        botInfo: {
-          id: botInfo.id,
-          username: botInfo.username,
-          discriminator: botInfo.discriminator,
-          avatar: botInfo.avatar,
-        },
-      }
-    } catch (error) {
-      return { valid: false, error: "Netzwerkfehler bei Token-Validierung" }
-    }
-  }
-
   async startBot(botConfig: any): Promise<{ success: boolean; error?: string }> {
     try {
-      // Token validieren
-      const tokenValidation = await this.validateToken(botConfig.token)
-      if (!tokenValidation.valid) {
-        return { success: false, error: tokenValidation.error }
-      }
-
       // Bot-Status auf "starting" setzen
       const botInstance: BotInstance = {
         id: botConfig.id,

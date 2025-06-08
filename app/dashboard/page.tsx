@@ -13,7 +13,8 @@ import { Bot, Plus, Activity, Users, MessageSquare, Shield, LogOut } from "lucid
 import { useRouter } from "next/navigation"
 import { BotManager } from "@/lib/bot-manager"
 import { ConfigCheck } from "@/components/config-check"
-import { AdminSetup } from "@/components/admin-setup"
+// Entferne diese Zeile:
+// import { AdminSetup } from "@/components/admin-setup"
 
 interface BotConfig {
   id: string
@@ -86,35 +87,15 @@ export default function DashboardPage() {
       const { data: botsData, error } = await supabase
         .from("bots")
         .select(`
-          *,
-          custom_commands (*)
-        `)
+        *,
+        custom_commands (*)
+      `)
         .eq("user_id", user.id)
         .order("created_at", { ascending: false })
 
       if (error) {
         console.error("Error loading bots:", error)
-        // Fallback zu Mock-Daten wenn DB nicht verfügbar
-        const mockBots: BotConfig[] = [
-          {
-            id: "mock-1",
-            name: "Demo Bot (Mock)",
-            token: "MTIzNDU2Nzg5MDEyMzQ1Njc4OTA.XXXXXX.XXXXXXXXXXXXXXXXXXXXXXXXXX",
-            status: "offline",
-            prefix: "!",
-            welcomeMessage: "Willkommen auf dem Server!",
-            moderationEnabled: true,
-            autoRoleEnabled: false,
-            customCommands: [
-              { trigger: "ping", response: "Pong!" },
-              { trigger: "info", response: "Das ist mein Discord Bot!" },
-            ],
-          },
-        ]
-        setBots(mockBots)
-        if (mockBots.length > 0) {
-          setSelectedBot(mockBots[0])
-        }
+        setBots([])
         return
       }
 
@@ -141,6 +122,7 @@ export default function DashboardPage() {
       }
     } catch (error) {
       console.error("Error in loadBots:", error)
+      setBots([])
     }
   }
 
@@ -159,12 +141,12 @@ export default function DashboardPage() {
   const addBot = async () => {
     if (!newBotToken || !newBotName) return
 
-    // Token validieren
-    const tokenValidation = await botManager.validateToken(newBotToken)
-    if (!tokenValidation.valid) {
-      alert(`Token-Fehler: ${tokenValidation.error}`)
-      return
-    }
+    // Entferne die Token-Validierung komplett
+    // const tokenValidation = await botManager.validateToken(newBotToken)
+    // if (!tokenValidation.valid) {
+    //   alert(`Token-Fehler: ${tokenValidation.error}`)
+    //   return
+    // }
 
     try {
       const { createClient } = await import("@/lib/supabase")
@@ -365,7 +347,8 @@ export default function DashboardPage() {
 
       <div className="p-6">
         <ConfigCheck onValidationComplete={(result) => setConfigValid(result.valid)} />
-        <AdminSetup user={user} />
+        {/* Entferne diese Zeile: */}
+        {/* <AdminSetup user={user} /> */}
       </div>
 
       <div className="flex">
