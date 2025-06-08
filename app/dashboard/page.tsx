@@ -12,8 +12,8 @@ import { Badge } from "@/components/ui/badge"
 import { Bot, Plus, Activity, Users, MessageSquare, Shield, LogOut } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { BotManager } from "@/lib/bot-manager"
-import { ConfigValidator } from "@/lib/config-validator"
 import { ConfigCheck } from "@/components/config-check"
+import { AdminSetup } from "@/components/admin-setup"
 
 interface BotConfig {
   id: string
@@ -71,27 +71,76 @@ export default function DashboardPage() {
     }
   }
 
-  const loadBots = () => {
-    // Simulierte Bot-Daten
-    const mockBots: BotConfig[] = [
-      {
-        id: "1",
-        name: "MeinBot",
-        token: "MTIzNDU2Nzg5MDEyMzQ1Njc4OTA.XXXXXX.XXXXXXXXXXXXXXXXXXXXXXXXXX",
-        status: "online",
-        prefix: "!",
-        welcomeMessage: "Willkommen auf dem Server!",
-        moderationEnabled: true,
-        autoRoleEnabled: false,
-        customCommands: [
-          { trigger: "ping", response: "Pong!" },
-          { trigger: "info", response: "Das ist mein Discord Bot!" },
-        ],
-      },
-    ]
-    setBots(mockBots)
-    if (mockBots.length > 0) {
-      setSelectedBot(mockBots[0])
+  const loadBots = async () => {
+    try {
+      const { createClient } = await import("@/lib/supabase")
+      const supabase = createClient()
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
+      if (!user) return
+
+      // Lade Bots aus der echten Datenbank
+      const { data: botsData, error } = await supabase
+        .from("bots")
+        .select(`
+          *,
+          custom_commands (*)
+        `)
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+
+      if (error) {
+        console.error("Error loading bots:", error)
+        // Fallback zu Mock-Daten wenn DB nicht verfügbar
+        const mockBots: BotConfig[] = [
+          {
+            id: "mock-1",
+            name: "Demo Bot (Mock)",
+            token: "MTIzNDU2Nzg5MDEyMzQ1Njc4OTA.XXXXXX.XXXXXXXXXXXXXXXXXXXXXXXXXX",
+            status: "offline",
+            prefix: "!",
+            welcomeMessage: "Willkommen auf dem Server!",
+            moderationEnabled: true,
+            autoRoleEnabled: false,
+            customCommands: [
+              { trigger: "ping", response: "Pong!" },
+              { trigger: "info", response: "Das ist mein Discord Bot!" },
+            ],
+          },
+        ]
+        setBots(mockBots)
+        if (mockBots.length > 0) {
+          setSelectedBot(mockBots[0])
+        }
+        return
+      }
+
+      // Konvertiere DB-Daten zu BotConfig Format
+      const formattedBots: BotConfig[] = botsData.map((bot) => ({
+        id: bot.id,
+        name: bot.name,
+        token: bot.token,
+        status: bot.status as "online" | "offline" | "starting" | "error",
+        prefix: bot.prefix,
+        welcomeMessage: bot.welcome_message || "",
+        moderationEnabled: bot.moderation_enabled,
+        autoRoleEnabled: bot.auto_role_enabled,
+        customCommands:
+          bot.custom_commands?.map((cmd: any) => ({
+            trigger: cmd.trigger,
+            response: cmd.response,
+          })) || [],
+      }))
+
+      setBots(formattedBots)
+      if (formattedBots.length > 0) {
+        setSelectedBot(formattedBots[0])
+      }
+    } catch (error) {
+      console.error("Error in loadBots:", error)
     }
   }
 
@@ -117,38 +166,98 @@ export default function DashboardPage() {
       return
     }
 
-    const newBot: BotConfig = {
-      id: Date.now().toString(),
-      name: newBotName,
-      token: newBotToken,
-      status: "offline",
-      prefix: "!",
-      welcomeMessage: "Willkommen!",
-      moderationEnabled: false,
-      autoRoleEnabled: false,
-      customCommands: [],
-    }
+    try {
+      const { createClient } = await import("@/lib/supabase")
+      const supabase = createClient()
 
-    // Bot-Konfiguration validieren
-    const configValidation = ConfigValidator.validateBotConfig(newBot)
-    if (!configValidation.valid) {
-      alert(`Konfigurationsfehler: ${configValidation.errors.join(", ")}`)
-      return
-    }
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      if (!user) return
 
-    setBots([...bots, newBot])
-    setSelectedBot(newBot)
-    setShowAddBot(false)
-    setNewBotToken("")
-    setNewBotName("")
+      // Bot in Datenbank speichern
+      const { data: newBotData, error } = await supabase
+        .from("bots")
+        .insert([
+          {
+            user_id: user.id,
+            name: newBotName,
+            token: newBotToken,
+            status: "offline",
+            prefix: "!",
+            welcome_message: "Willkommen!",
+            moderation_enabled: false,
+            auto_role_enabled: false,
+          },
+        ])
+        .select()
+        .single()
+
+      if (error) {
+        alert(`Fehler beim Speichern: ${error.message}`)
+        return
+      }
+
+      // Neuen Bot zu lokaler Liste hinzufügen
+      const newBot: BotConfig = {
+        id: newBotData.id,
+        name: newBotData.name,
+        token: newBotData.token,
+        status: newBotData.status,
+        prefix: newBotData.prefix,
+        welcomeMessage: newBotData.welcome_message || "",
+        moderationEnabled: newBotData.moderation_enabled,
+        autoRoleEnabled: newBotData.auto_role_enabled,
+        customCommands: [],
+      }
+
+      setBots([...bots, newBot])
+      setSelectedBot(newBot)
+      setShowAddBot(false)
+      setNewBotToken("")
+      setNewBotName("")
+    } catch (error) {
+      alert(`Fehler: ${error}`)
+    }
   }
 
-  const updateBot = (updates: Partial<BotConfig>) => {
+  const updateBot = async (updates: Partial<BotConfig>) => {
     if (!selectedBot) return
 
     const updatedBot = { ...selectedBot, ...updates }
-    setBots(bots.map((bot) => (bot.id === selectedBot.id ? updatedBot : bot)))
-    setSelectedBot(updatedBot)
+
+    try {
+      const { createClient } = await import("@/lib/supabase")
+      const supabase = createClient()
+
+      // Bot in Datenbank aktualisieren
+      const { error } = await supabase
+        .from("bots")
+        .update({
+          name: updatedBot.name,
+          prefix: updatedBot.prefix,
+          welcome_message: updatedBot.welcomeMessage,
+          moderation_enabled: updatedBot.moderationEnabled,
+          auto_role_enabled: updatedBot.autoRoleEnabled,
+          status: updatedBot.status,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", selectedBot.id)
+
+      if (error) {
+        console.error("Error updating bot:", error)
+        // Trotzdem lokal aktualisieren
+      }
+
+      // Lokal aktualisieren
+      setBots(bots.map((bot) => (bot.id === selectedBot.id ? updatedBot : bot)))
+      setSelectedBot(updatedBot)
+    } catch (error) {
+      console.error("Error in updateBot:", error)
+      // Fallback: nur lokal aktualisieren
+      setBots(bots.map((bot) => (bot.id === selectedBot.id ? updatedBot : bot)))
+      setSelectedBot(updatedBot)
+    }
   }
 
   const toggleBotStatus = async () => {
@@ -207,6 +316,19 @@ export default function DashboardPage() {
     updateBot({ customCommands: newCommands })
   }
 
+  useEffect(() => {
+    const handleDatabaseSetup = () => {
+      // Reload bots after database setup
+      loadBots()
+    }
+
+    window.addEventListener("database-setup-complete", handleDatabaseSetup)
+
+    return () => {
+      window.removeEventListener("database-setup-complete", handleDatabaseSetup)
+    }
+  }, [])
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -243,6 +365,7 @@ export default function DashboardPage() {
 
       <div className="p-6">
         <ConfigCheck onValidationComplete={(result) => setConfigValid(result.valid)} />
+        <AdminSetup user={user} />
       </div>
 
       <div className="flex">
